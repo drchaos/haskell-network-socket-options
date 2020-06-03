@@ -72,7 +72,7 @@ import Foreign.C.Types
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peek)
-import Network.Socket (Socket, SocketType(..), fdSocket)
+import Network.Socket (Socket, SocketType(..), withFdSocket)
 import Network.Socket.Internal (throwSocketErrorIfMinus1_)
 import System.Posix.Types (Fd(Fd))
 
@@ -90,17 +90,17 @@ import GHC.IO.Handle.Types (Handle__(Handle__, haDevice))
 -- | The getters and setters in this module can be used not only on 'Socket's,
 -- but on raw 'Fd's (file descriptors) as well.
 class HasSocket a where
-    getSocket :: a -> CInt
+    withFd :: a -> (CInt -> IO r) -> IO r
 
 instance HasSocket Fd where
-    getSocket (Fd n) = n
+    withFd (Fd n) a = a n
 
 instance HasSocket Socket where
-    getSocket = fdSocket
+    withFd = withFdSocket
 
 ##ifdef __GLASGOW_HASKELL__
 instance HasSocket FD.FD where
-    getSocket = FD.fdFD
+    withFd fd a = a $ FD.fdFD fd
 ##endif
 
 type Seconds        = Int
@@ -147,8 +147,9 @@ getLinger :: HasSocket sock => sock -> IO (Maybe Seconds)
 getLinger sock =
     alloca $ \l_onoff_ptr ->
     alloca $ \l_linger_ptr -> do
-        throwSocketErrorIfMinus1_ "getsockopt" $
-            c_getsockopt_linger (getSocket sock) l_onoff_ptr l_linger_ptr
+        withFd sock $ \fd ->
+          throwSocketErrorIfMinus1_ "getsockopt" $
+              c_getsockopt_linger fd l_onoff_ptr l_linger_ptr
         onoff <- peek l_onoff_ptr
         if onoff /= 0
             then (Just . fromIntegral) `fmap` peek l_linger_ptr
@@ -219,11 +220,13 @@ setKeepAlive = setBool #{const SOL_SOCKET} #{const SO_KEEPALIVE}
 -- wrap around.
 setLinger :: HasSocket sock => sock -> Maybe Seconds -> IO ()
 setLinger sock (Just linger) =
-    throwSocketErrorIfMinus1_ "setsockopt" $
-        c_setsockopt_linger (getSocket sock) 1 (fromIntegral linger)
+    withFd sock $ \fd ->
+      throwSocketErrorIfMinus1_ "setsockopt" $
+          c_setsockopt_linger fd 1 (fromIntegral linger)
 setLinger sock Nothing =
-    throwSocketErrorIfMinus1_ "setsockopt" $
-        c_setsockopt_linger (getSocket sock) 0 0
+    withFd sock $ \fd ->
+      throwSocketErrorIfMinus1_ "setsockopt" $
+          c_setsockopt_linger fd 0 0
 
 setOOBInline :: HasSocket sock => sock -> Bool -> IO ()
 setOOBInline = setBool #{const SOL_SOCKET} #{const SO_OOBINLINE}
@@ -279,26 +282,30 @@ setInt level optname sock n =
 getCInt :: HasSocket sock => Level -> OptName -> sock -> IO CInt
 getCInt level optname sock =
     alloca $ \ptr -> do
-        throwSocketErrorIfMinus1_ "getsockopt" $
-            c_getsockopt_int (getSocket sock) level optname ptr
+        withFd sock $ \fd ->
+          throwSocketErrorIfMinus1_ "getsockopt" $
+              c_getsockopt_int fd level optname ptr
         peek ptr
 
 setCInt :: HasSocket sock => Level -> OptName -> sock -> CInt -> IO ()
-setCInt level optname sock n =
-    throwSocketErrorIfMinus1_ "setsockopt" $
-        c_setsockopt_int (getSocket sock) level optname n
+setCInt level optname sock n = do
+    withFd sock $ \fd ->
+      throwSocketErrorIfMinus1_ "setsockopt" $
+          c_setsockopt_int fd level optname n
 
 getTime :: HasSocket sock => Level -> OptName -> sock -> IO Microseconds
 getTime level optname sock =
     alloca $ \ptr -> do
-        throwSocketErrorIfMinus1_ "getsockopt" $
-            c_getsockopt_time (getSocket sock) level optname ptr
+        withFd sock $ \fd ->
+          throwSocketErrorIfMinus1_ "getsockopt" $
+              c_getsockopt_time fd level optname ptr
         peek ptr
 
 setTime :: HasSocket sock => Level -> OptName -> sock -> Microseconds -> IO ()
-setTime level optname sock usec =
-    throwSocketErrorIfMinus1_ "setsockopt" $
-        c_setsockopt_time (getSocket sock) level optname usec
+setTime level optname sock usec = do
+    withFd sock $ \fd ->
+      throwSocketErrorIfMinus1_ "setsockopt" $
+          c_setsockopt_time fd level optname usec
 
 foreign import ccall
     c_getsockopt_int :: SockFd -> Level -> OptName -> Ptr CInt -> IO CInt

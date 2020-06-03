@@ -1,5 +1,5 @@
 name:                network-socket-options
-version:             0.2.0.1
+version:             0.2.0.2
 synopsis:            Type-safe, portable alternative to getSocketOption/setSocketOption
 description:
     The network package provides getSocketOption and setSocketOption functions.
@@ -46,4 +46,4 @@ library
     other-extensions: CPP, ForeignFunctionInterface
 
     build-depends: base == 4.*
-                 , network
+                 , network >= 3.1
